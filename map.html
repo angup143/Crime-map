@@ -1,0 +1,513 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <!--The viewport meta tag is used to improve the presentation and behavior of the samples
+      on iOS devices-->
+    <meta name="viewport" content="initial-scale=1, maximum-scale=1,user-scalable=no">
+    <title>Multiple Routes</title>
+
+    <link rel="stylesheet" href="http://js.arcgis.com/3.11/dijit/themes/claro/claro.css">
+    <link rel="stylesheet" href="http://js.arcgis.com/3.11/esri/css/esri.css">
+    <style>
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #map {
+            padding: 0;
+            border: solid 1px #343642;
+            margin: 5px 5px 5px 0px;
+        }
+
+        #leftPane {
+            width: 20%;
+            border-top: solid 1px #343642;
+            border-right: solid 1px #343642;
+            border-bottom: solid 1px #343642;
+            margin: 5px 0px 5px 5px;
+            color: #343642;
+            font: 100% Georgia,"Times New Roman",Times,serif;
+            /*letter-spacing: 0.05em;*/
+        }
+    </style>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+
+    <script src="http://js.arcgis.com/3.11/"></script>
+    <script>
+        require([
+          "esri/urlUtils",
+          "esri/config",
+          "esri/map",
+          "esri/graphic",
+          "esri/tasks/RouteTask",
+          "esri/tasks/RouteParameters",
+
+          "esri/tasks/FeatureSet",
+          "esri/symbols/SimpleMarkerSymbol",
+          "esri/symbols/SimpleLineSymbol",
+
+          "esri/Color",
+          "dojo/_base/array",
+          "dojo/on",
+          "dojo/dom",
+          "dijit/registry",
+          "esri/InfoTemplate",
+          "esri/dijit/BasemapGallery",
+          "esri/arcgis/utils",
+          "dojo/parser", "esri/tasks/locator", "esri/symbols/Font",
+          "esri/symbols/TextSymbol", "dojo/number","esri/geometry/webMercatorUtils",
+
+          "dijit/layout/BorderContainer",
+          "dijit/layout/ContentPane",
+          "dijit/form/HorizontalSlider",
+          "dijit/form/HorizontalRuleLabels",
+          "dijit/layout/BorderContainer", "dijit/layout/ContentPane", "dijit/TitlePane",
+          "dojo/domReady!", "dijit/form/Button", "dijit/form/Textarea"
+
+
+        ], function (
+          urlUtils, esriConfig, Map, Graphic, RouteTask, RouteParameters,
+          FeatureSet, SimpleMarkerSymbol, SimpleLineSymbol,
+          Color, array, on, dom, registry, InfoTemplate,
+          BasemapGallery, arcgisUtils, parser, Locator, Font, TextSymbol, number, webMercatorUtils
+        ) {
+            var map, routeTask, routeParams, routes = [];
+            var locator;
+            var stopSymbol, barrierSymbol, routeSymbols;
+            var mapOnClick_addStops_connect, mapOnClick_addBarriers_connect;
+
+            var address = "http://data.police.uk/api/crimes-street/all-crime?poly=";
+            var box;
+            var coord;
+			var displayCrime;
+            //var box = "52.031439, -2.080134: 51.420687, -1.953791:51.605291, -0.410212"
+            //var box="52.268,0.543:52.794,0.238:52.130,0.478";
+            var time = "&date2013-01";
+            var url; // = address + box + time;
+            var LeftLong;
+            var RightLong;
+            var UpLat;
+            var DownLat;
+            var LatLong;
+
+            parser.parse();
+            urlUtils.addProxyRule({
+                urlPrefix: "http://route.arcgis.com",
+                proxyUrl: "proxy/proxy.ashx"
+            });
+
+            map = new Map("map", {
+                basemap: "streets",
+                center: [-1.258557, 51.755045],
+                zoom: 12
+            });
+
+
+            var basemapGallery = new BasemapGallery({
+                showArcGISBasemaps: true,
+                map: map
+            }, "basemapGallery");
+            basemapGallery.startup();
+
+            basemapGallery.on("error", function (msg) {
+                console.log("basemap gallery error:  ", msg);
+            });
+
+            routeTask = new RouteTask("https://route.arcgis.com/arcgis/rest/services/World/Route/NAServer/Route_World");
+            routeParams = new RouteParameters();
+            routeParams.stops = new FeatureSet();
+            routeParams.barriers = new FeatureSet();
+            routeParams.outSpatialReference = { "wkid": 102100 };
+            locator = new Locator("http://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer");
+            locator.on("address-to-locations-complete", showResults);
+            routeTask.on("solve-complete", showRoute);
+            routeTask.on("error", errorHandler);
+
+            stopSymbol = new SimpleMarkerSymbol().setStyle(SimpleMarkerSymbol.STYLE_CROSS).setSize(15);
+            stopSymbol.outline.setWidth(3);
+
+            barrierSymbol = new SimpleMarkerSymbol().setStyle(SimpleMarkerSymbol.STYLE_X).setSize(10);
+            barrierSymbol.outline.setWidth(3).setColor(new Color([255, 0, 0]));
+
+            routeSymbols = {
+                "Route 1": new SimpleLineSymbol().setColor(new Color([0, 0, 255, 0.5])).setWidth(5),
+                "Route 2": new SimpleLineSymbol().setColor(new Color([0, 255, 0, 0.5])).setWidth(5),
+                "Route 3": new SimpleLineSymbol().setColor(new Color([255, 0, 255, 0.5])).setWidth(5)
+            };
+
+            //button click event listeners can't be added directly in HTML when the code is wrapped in an AMD callback
+            on(dom.byId("addStopsBtn"), "click", addStops);
+            on(dom.byId("clearStopsBtn"), "click", clearStops);
+            on(dom.byId("addBarriersBtn"), "click", addBarriers);
+            on(dom.byId("clearBarriersBtn"), "click", clearBarriers);
+            on(dom.byId("solveRoutesBtn"), "click", solveRoute);
+            on(dom.byId("clearRoutesBtn"), "click", clearRoutes);
+			on(dom.byId("crimeIntensity"),"click", chooseintensity);
+            registry.byId("locate").on("click", locate);
+			
+			function chooseintensity(){
+					displayCrime=dom.byId("crimeIntensity").value;
+				}
+
+            function locate() {
+                var address = {
+                    "SingleLine": dom.byId("address").value
+                };
+                locator.outSpatialReference = map.spatialReference;
+                var options = {
+                    address: address,
+                    outFields: ["Loc_name"]
+                };
+                locator.addressToLocations(options);
+            }
+
+
+
+            //Begins listening for click events to add stops
+            function addStops() {
+                removeEventHandlers();
+                mapOnClick_addStops_connect = map.on("click", addStop);
+            }
+
+            //Clears all stops
+            function clearStops() {
+                removeEventHandlers();
+                for (var i = routeParams.stops.features.length - 1; i >= 0; i--) {
+                    map.graphics.remove(routeParams.stops.features.splice(i, 1)[0]);
+                }
+            }
+
+            //Adds a stop. The stop is associated with the route currently displayed in the dropdown
+            function addStop(evt) {
+                routeParams.stops.features.push(
+                  map.graphics.add(
+                    new esri.Graphic(
+                      evt.mapPoint,
+                      stopSymbol,
+                      { RouteName: dom.byId("routeName").value }
+                    )
+                  )
+                );
+            }
+
+            //Begins listening for click events to add barriers
+            function addBarriers() {
+                removeEventHandlers();
+                mapOnClick_addBarriers_connect = on(map, "click", addBarrier);
+            }
+
+            //Clears all barriers
+            function clearBarriers() {
+                removeEventHandlers();
+                for (var i = routeParams.barriers.features.length - 1; i >= 0; i--) {
+                    map.graphics.remove(routeParams.barriers.features.splice(i, 1)[0]);
+                }
+            }
+
+            //Adds a barrier
+            function addBarrier(evt) {
+                routeParams.barriers.features.push(
+                  map.graphics.add(
+                    new esri.Graphic(
+                      evt.mapPoint,
+                      barrierSymbol
+                    )
+                  )
+                );
+            }
+
+            //Stops listening for click events to add barriers and stops (if they've already been wired)
+            function removeEventHandlers() {
+                if (mapOnClick_addStops_connect) {
+                    mapOnClick_addStops_connect.remove();
+                }
+                if (mapOnClick_addBarriers_connect) {
+                    mapOnClick_addBarriers_connect.remove();
+                }
+            }
+
+            //Solves the routes. Any errors will trigger the errorHandler function.
+            function solveRoute() {
+                console.log("reached Solve Button");
+                removeEventHandlers();
+                routeTask.solve(routeParams);
+            }
+
+            //Clears all routes
+            function clearRoutes() {
+                for (var i = routes.length - 1; i >= 0; i--) {
+                    map.graphics.remove(routes.splice(i, 1)[0]);
+                }
+                routes = [];
+            }
+
+            //Draws the resulting routes on the map
+            function showRoute(evt) {
+                clearRoutes();
+
+                array.forEach(evt.result.routeResults, function (routeResult, i) {
+                    routes.push(
+                      map.graphics.add(
+                        routeResult.route.setSymbol(routeSymbols[routeResult.routeName])
+                      )
+                    );
+                });
+
+                var msgs = ["Server messages:"];
+                array.forEach(evt.result.messages, function (message) {
+                    msgs.push(message.type + " : " + message.description);
+                });
+                if (msgs.length > 1) {
+                    alert(msgs.join("\n - "));
+                }
+            }
+
+            
+
+            //Reports any errors that occurred during the solve
+            function errorHandler(err) {
+                alert("An error occured\n" + err.message + "\n" + err.details.join("\n"));
+            }
+
+
+            function getCrime() {
+                var Long;
+                var Lat;
+                console.log(coord);
+                LatLong = webMercatorUtils.xyToLngLat(coord.x, coord.y);
+                console.log(LatLong);
+                Long = LatLong[0];
+                Lat = LatLong[1];
+                LeftLong = Lat + 0.04;
+                console.log(LeftLong);
+                RightLong = Lat - 0.04;
+                UpLat = Long - 0.04;
+                DownLat = Long + 0.04;
+                //box = "52.268,0.543:52.794,0.238:52.130,0.478";
+                //console.log(box);
+                box = LeftLong.toString() + "," + UpLat.toString() + ":" + LeftLong.toString() + "," + DownLat.toString() + ":"
+                    + RightLong.toString() + "," + DownLat.toString() + ":" + RightLong.toString() + "," + UpLat.toString();
+                console.log(box);
+                url = address + box + time;
+                //var box = "52.031439, -2.080134: 51.420687, -1.953791:51.605291, -0.410212"
+
+                var locationLayer = new esri.layers.GraphicsLayer();
+                $.get(url, function (crimes) {
+                    console.log(crimes)
+                    var latitude = [crimes[0].location.latitude];
+                    var longitude = [crimes[0].location.longitude];
+                    var category = [crimes[0].category];
+                    var crimeinstance = [0];
+                    for (i = 0; i < crimes.length; i++) {
+                        for (j = 0; j < latitude.length; j++) {
+                            if (crimes[i].location.latitude == latitude[j] && crimes[i].location.longitude == longitude[j]) {
+                                crimeinstance[j] += 1;
+                                break
+                            }
+                            else if (j == latitude.length - 1) {
+                                latitude.push(crimes[i].location.latitude);
+                                longitude.push(crimes[i].location.longitude);
+                                crimeinstance.push(0);
+                            }
+                        }
+                    }
+                    console.log(crimes.length)
+                    console.log(latitude.length)
+                    for (i = 0; i < latitude.length; i++) {
+
+                        console.log ("\n latitude:" + latitude[i] + "longitude:" + longitude[i] + " crimes:" + crimeinstance[i] + " Type: " + category[i]);
+                        if (crimeinstance[i] > 2) {
+                            var point = new esri.geometry.Point(longitude[i], latitude[i]);
+                            var yellowsymbol = new SimpleMarkerSymbol().setColor("#FFFF00").setSize(10);
+                            var mustardsymbol = new SimpleMarkerSymbol().setColor("#FFCC00").setSize(10);
+                            var orangesymbol = new SimpleMarkerSymbol().setColor("#FF9933").setSize(10);
+                            var redsymbol = new SimpleMarkerSymbol().setColor("#FF3300").setSize(10);
+							
+							if(displayCrime=="Extreme"){
+								if (crimeinstance[i] > 5) {
+									routeParams.barriers.features.push(
+										map.graphics.add(
+										  new esri.Graphic(
+											point,
+											redsymbol
+												)
+										)
+									)
+								}
+							}
+							
+							else if(displayCrime=="Medium"){
+								if (crimeinstance[i] > 5) {
+									routeParams.barriers.features.push(
+										map.graphics.add(
+										  new esri.Graphic(
+											point,
+											redsymbol
+												)
+										)
+									)
+								}
+								else if (crimeinstance[i] > 4) {
+									routeParams.barriers.features.push(
+										map.graphics.add(
+										  new esri.Graphic(
+											point,
+											orangesymbol
+												)
+										)
+									)
+								}
+							}
+							
+							else if(displayCrime=="All Crime"){
+
+								if (crimeinstance[i] > 5) {
+									routeParams.barriers.features.push(
+										map.graphics.add(
+										  new esri.Graphic(
+											point,
+											redsymbol
+												)
+										)
+									)
+								}
+								else if (crimeinstance[i] > 4) {
+									routeParams.barriers.features.push(
+										map.graphics.add(
+										  new esri.Graphic(
+											point,
+											orangesymbol
+												)
+										)
+									)
+								}
+								else if (crimeinstance[i] > 3) {
+									//routeParams.barriers.features.push(
+									map.graphics.add(
+									  new esri.Graphic(
+										point,
+										mustardsymbol
+											)
+									)
+									//)
+								}
+								else {
+									//routeParams.barriers.features.push(
+									map.graphics.add(
+									  new esri.Graphic(
+										point,
+										yellowsymbol
+											)
+									)
+									//)
+								}
+							}
+
+                            console.log(routeParams.barriers.features);
+
+                        }
+                        //map.addLayer(locationLayer);
+                    }
+
+
+                });
+            }
+
+            function showResults(evt) {
+                var symbol = new SimpleMarkerSymbol();
+                var infoTemplate = new InfoTemplate(
+                  "Location",
+                  "Address: ${address}<br />Score: ${score}<br />Source locator: ${locatorName}"
+                );
+                symbol.setStyle(SimpleMarkerSymbol.STYLE_SQUARE);
+                symbol.setColor(new Color([153, 0, 51, 0.75]));
+                var geom;
+                array.every(evt.addresses, function (candidate) {
+                    console.log(candidate.score);
+                    if (candidate.score > 80) {
+                        console.log(candidate.location);
+                        var attributes = {
+                            address: candidate.address,
+                            score: candidate.score,
+                            locatorName: candidate.attributes.Loc_name
+                        };
+                        geom = candidate.location;
+                        var graphic = new Graphic(geom, symbol, attributes, infoTemplate);
+                        //add a graphic to the map at the geocoded location
+                        map.graphics.add(graphic);
+                        //add a text symbol to the map listing the location of the matched address.
+                        var displayText = candidate.address;
+                        var font = new Font(
+                          "16pt",
+                          Font.STYLE_NORMAL,
+                          Font.VARIANT_NORMAL,
+                          Font.WEIGHT_BOLD,
+                          "Helvetica"
+                        );
+
+                        var textSymbol = new TextSymbol(
+                          displayText,
+                          font,
+                          new Color("#666633")
+                        );
+                        textSymbol.setOffset(0, 8);
+                        map.graphics.add(new Graphic(geom, textSymbol));
+                        coord = geom;
+                        return false; //break out of loop after one candidate with score greater  than 80 is found.
+                    }
+                });
+                if (geom !== undefined) {
+                    map.centerAndZoom(geom, 12);
+                    getCrime();
+                }
+            }
+
+        });
+
+
+    </script>
+
+</head>
+<body class="claro">
+
+    Select route name: <select id="routeName">
+        <option value="Route 1">Route 1</option>
+        <option value="Route 2">Route 2</option>
+        <option value="Route 3">Route 3</option>
+    </select> to
+    <button id="addStopsBtn">Add Stops</button>
+    <button id="clearStopsBtn">Clear Stops</button>
+    <button id="addBarriersBtn">Add Barriers</button>
+    <button id="clearBarriersBtn">Clear Barriers</button>
+    <button id="solveRoutesBtn">Solve Routes</button>
+    <button id="clearRoutesBtn">Clear Routes</button>
+    <br /> <br />
+    <div id="map" style="width:1035px; height:500px; border:1px solid #000;">
+        <div style="position:absolute; right:20px; top:10px; z-Index:999;">
+            <div data-dojo-type="dijit/TitlePane"
+                 data-dojo-props="title:'Settings', closable:false, open:false">
+                <div data-dojo-type="dijit/layout/ContentPane" style="width:380px; height:280px; overflow:auto;">
+                    <div id="basemapGallery">
+                    </div>
+                </div>
+            </div>
+                    <textarea id="address" style="position:absolute; right:20px; top:350px; z-index:999;">Select your starting point</textarea>
+                    <br>
+                            <button id="locate" style="position:absolute; right:20px; top:400px;" data-dojo-type="dijit/form/Button">Locate</button>
+                        </div>
+        </div>
+                   
+    
+</body>
+<body>
+	Select crime intensity: <select id="crimeIntensity" >
+        <option value="Extreme">Extreme</option>
+        <option value="Medium">Medium</option>
+        <option value="All Crime">All Crime</option>
+		</select>
+</body>
+</html>
